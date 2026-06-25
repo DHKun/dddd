@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/logrusorgru/aurora"
 	"github.com/pkg/errors"
@@ -81,6 +82,9 @@ type Store struct {
 	// NotFoundCallback is called for each not found template
 	// This overrides error handling for not found templates
 	NotFoundCallback func(template string) bool
+
+	namedTemplatesMutex sync.Mutex
+	namedTemplatesCache map[string][]*templates.Template
 }
 
 // NewConfig returns a new loader config
@@ -132,8 +136,9 @@ func New(config *Config) (*Store, error) {
 
 	// Create a tag filter based on provided configuration
 	store := &Store{
-		config:    config,
-		tagFilter: tagFilter,
+		config:              config,
+		tagFilter:           tagFilter,
+		namedTemplatesCache: make(map[string][]*templates.Template),
 		pathFilter: filter.NewPathFilter(&filter.PathFilterConfig{
 			IncludedTemplates: config.IncludeTemplates,
 			ExcludedTemplates: config.ExcludeTemplates,
@@ -503,9 +508,92 @@ func splitPathAndFileName(path string) (string, string) {
 	return strings.Join(t[:len(t)-1], "/"), t[len(t)-1]
 }
 
+type templateNameSelection struct {
+	pathNames []string
+	tagNames  map[string]struct{}
+	fuzzy     bool
+}
+
+func newTemplateNameSelection(pocNames []string, fuzzy bool) templateNameSelection {
+	selection := templateNameSelection{
+		tagNames: make(map[string]struct{}),
+		fuzzy:    fuzzy,
+	}
+	for _, pocName := range pocNames {
+		normalized := normalizeTemplateSelector(pocName)
+		if normalized == "" {
+			continue
+		}
+		if strings.HasPrefix(normalized, "tags@") {
+			tagName := strings.TrimPrefix(normalized, "tags@")
+			tagName = strings.TrimSuffix(tagName, ".yaml")
+			tagName = strings.TrimSuffix(tagName, ".yml")
+			if tagName != "" {
+				selection.tagNames[tagName] = struct{}{}
+			}
+			continue
+		}
+		selection.pathNames = append(selection.pathNames, normalized)
+	}
+	return selection
+}
+
+func normalizeTemplateSelector(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return strings.ReplaceAll(value, "\\", "/")
+}
+
+func (selection templateNameSelection) matchesPath(templatePath string) bool {
+	normalizedPath := normalizeTemplateSelector(templatePath)
+	for _, pocName := range selection.pathNames {
+		if selection.fuzzy && strings.Contains(normalizedPath, pocName) {
+			return true
+		}
+		if !selection.fuzzy && strings.HasSuffix(normalizedPath, pocName) {
+			return true
+		}
+	}
+	return false
+}
+
+func (selection templateNameSelection) matchesTags(tags []string) bool {
+	for _, tag := range tags {
+		if _, ok := selection.tagNames[strings.ToLower(strings.TrimSpace(tag))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func namedTemplatesCacheKey(pocNames, excludeTags, enableSeverities []string, fuzzy bool) string {
+	normalize := func(values []string) []string {
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			value = normalizeTemplateSelector(value)
+			if value != "" {
+				result = append(result, value)
+			}
+		}
+		sort.Strings(result)
+		return result
+	}
+	return fmt.Sprintf("%t|%q|%q|%q", fuzzy, normalize(pocNames), normalize(excludeTags), normalize(enableSeverities))
+}
+
 func (store *Store) LoadTemplatesWithNames(f embed.FS, templatesList []string,
 	pocNames []string, excludeTags []string, enableSeverities []string,
 	fuzzyMatching bool) []*templates.Template {
+	cacheKey := namedTemplatesCacheKey(pocNames, excludeTags, enableSeverities, fuzzyMatching)
+	store.namedTemplatesMutex.Lock()
+	defer store.namedTemplatesMutex.Unlock()
+	if store.namedTemplatesCache == nil {
+		store.namedTemplatesCache = make(map[string][]*templates.Template)
+	}
+	if cached, ok := store.namedTemplatesCache[cacheKey]; ok {
+		return cached
+	}
+
+	selection := newTemplateNameSelection(pocNames, fuzzyMatching)
 	loadedTemplatesName := make(map[string]struct{})
 
 	//includedTemplates, _ := store.config.Catalog.GetTemplatesPath(templatesList)
@@ -519,17 +607,22 @@ func (store *Store) LoadTemplatesWithNames(f embed.FS, templatesList []string,
 		if v == "" {
 			continue
 		}
-		enableSeveritiesOK = append(enableSeveritiesOK, v)
+		enableSeveritiesOK = append(enableSeveritiesOK, strings.ToLower(v))
 	}
-	for _, v := range excludeTagsOK {
+	for _, v := range excludeTags {
 		if v == "" {
 			continue
 		}
-		excludeTagsOK = append(excludeTagsOK, v)
+		excludeTagsOK = append(excludeTagsOK, strings.ToLower(v))
 	}
 
-	loadedTemplates := make([]*templates.Template, 0, len(templatesList))
+	loadedTemplates := make([]*templates.Template, 0, len(selection.pathNames))
 	for _, templatePath := range templatesList {
+		pathMatched := selection.matchesPath(templatePath)
+		if !pathMatched && len(selection.tagNames) == 0 {
+			continue
+		}
+
 		_, fileName := splitPathAndFileName(templatePath)
 		_, ok := loadedTemplatesName[fileName]
 		if ok {
@@ -548,8 +641,8 @@ func (store *Store) LoadTemplatesWithNames(f embed.FS, templatesList []string,
 		if len(excludeTagsOK) > 0 {
 			isExclude := false
 			for _, tag := range parsed.Info.Tags.ToSlice() {
-				for _, t := range excludeTags {
-					if t == tag {
+				for _, t := range excludeTagsOK {
+					if t == strings.ToLower(tag) {
 						isExclude = true
 						break
 					}
@@ -567,8 +660,8 @@ func (store *Store) LoadTemplatesWithNames(f embed.FS, templatesList []string,
 		if len(enableSeveritiesOK) > 0 {
 			isExclude := true
 
-			for _, s := range enableSeverities {
-				if strings.ToLower(s) == strings.ToLower(parsed.Info.SeverityHolder.Severity.String()) {
+			for _, severity := range enableSeveritiesOK {
+				if severity == strings.ToLower(parsed.Info.SeverityHolder.Severity.String()) {
 					isExclude = false
 					break
 				}
@@ -581,40 +674,7 @@ func (store *Store) LoadTemplatesWithNames(f embed.FS, templatesList []string,
 
 		loadedTemplatesName[fileName] = struct{}{}
 		tags := parsed.Info.Tags.ToSlice()
-		flag := false
-		for _, pocName := range pocNames {
-
-			changePocName := strings.ToLower(strings.ReplaceAll(pocName, "/", "\\"))
-			if fuzzyMatching {
-				if strings.Contains(strings.ToLower(templatePath), strings.ToLower(pocName)) {
-					flag = true
-					break
-				}
-			} else {
-				if strings.HasSuffix(strings.ToLower(templatePath), strings.ToLower(pocName)) {
-					flag = true
-					break
-				}
-				if strings.HasSuffix(strings.ToLower(templatePath), changePocName) {
-					flag = true
-					break
-				}
-				if strings.HasPrefix(pocName, "Tags@") {
-					tagName := pocName[5 : len(pocName)-5]
-					for _, t := range tags {
-						if strings.ToLower(t) == strings.ToLower(tagName) {
-							flag = true
-							break
-						}
-					}
-					if flag {
-						break
-					}
-				}
-			}
-
-		}
-		if flag {
+		if pathMatched || selection.matchesTags(tags) {
 			if len(parsed.RequestsHeadless) > 0 && !store.config.ExecutorOptions.Options.Headless {
 				gologger.Warning().Msgf("Headless flag is required for headless template %s\n", templatePath)
 			} else {
@@ -622,5 +682,6 @@ func (store *Store) LoadTemplatesWithNames(f embed.FS, templatesList []string,
 			}
 		}
 	}
+	store.namedTemplatesCache[cacheKey] = loadedTemplates
 	return loadedTemplates
 }
