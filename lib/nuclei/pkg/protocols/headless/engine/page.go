@@ -45,7 +45,7 @@ type Options struct {
 }
 
 // Run runs a list of actions by creating a new page in the browser.
-func (i *Instance) Run(input *contextargs.Context, actions []*Action, payloads map[string]interface{}, options *Options) (map[string]string, *Page, error) {
+func (i *Instance) Run(input *contextargs.Context, actions []*Action, payloads map[string]interface{}, options *Options) (ActionData, *Page, error) {
 	page, err := i.engine.Page(proto.TargetCreateTarget{})
 	if err != nil {
 		return nil, nil, err
@@ -67,10 +67,15 @@ func (i *Instance) Run(input *contextargs.Context, actions []*Action, payloads m
 		payloads: payloads,
 	}
 
+	httpclient, err := i.browser.getHTTPClient()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// in case the page has request/response modification rules - enable global hijacking
 	if createdPage.hasModificationRules() || containsModificationActions(actions...) {
 		hijackRouter := page.HijackRequests()
-		if err := hijackRouter.Add("*", "", createdPage.routingRuleHandler); err != nil {
+		if err := hijackRouter.Add("*", "", createdPage.routingRuleHandler(httpclient)); err != nil {
 			return nil, nil, err
 		}
 		createdPage.hijackRouter = hijackRouter

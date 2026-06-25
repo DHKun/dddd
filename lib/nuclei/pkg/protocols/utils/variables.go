@@ -24,6 +24,7 @@ func init() {
 		Host:     "Host",
 		Port:     "Port",
 		Path:     "Path",
+		Query:    "Query",
 		File:     "File",
 		Scheme:   "Scheme",
 		Input:    "Input",
@@ -44,6 +45,7 @@ const (
 	Host
 	Port
 	Path
+	Query
 	File
 	Scheme
 	Input
@@ -54,7 +56,7 @@ const (
 	Sd
 )
 
-// GenerateVariables will create default variables with context args
+// GenerateVariablesWithContextArgs will create default variables with context args
 func GenerateVariablesWithContextArgs(input *contextargs.Context, trailingSlash bool) map[string]interface{} {
 	parsed, err := urlutil.Parse(input.MetaInput.Input)
 	if err != nil {
@@ -162,6 +164,12 @@ func generateVariables(inputURL *urlutil.URL, removeTrailingSlash bool) map[stri
 			knownVariables[v] = port
 		case Path:
 			knownVariables[v] = requestPath
+		case Query:
+			if queryParams := urlutil.GetParams(parsed.URL.Query()); len(queryParams) > 0 {
+				knownVariables[v] = "?" + queryParams.Encode()
+			} else {
+				knownVariables[v] = ""
+			}
 		case File:
 			knownVariables[v] = base
 		case Scheme:

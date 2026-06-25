@@ -1,15 +1,15 @@
 package headless
 
 import (
-	"github.com/corpix/uarand"
 	"github.com/pkg/errors"
 
+	"github.com/projectdiscovery/nuclei/v3/pkg/fuzz"
 	useragent "github.com/projectdiscovery/nuclei/v3/pkg/model/types/userAgent"
 	"github.com/projectdiscovery/nuclei/v3/pkg/operators"
 	"github.com/projectdiscovery/nuclei/v3/pkg/protocols"
-	"github.com/projectdiscovery/nuclei/v3/pkg/protocols/common/fuzz"
 	"github.com/projectdiscovery/nuclei/v3/pkg/protocols/common/generators"
 	"github.com/projectdiscovery/nuclei/v3/pkg/protocols/headless/engine"
+	uagent "github.com/projectdiscovery/useragent"
 	fileutil "github.com/projectdiscovery/utils/file"
 )
 
@@ -135,7 +135,8 @@ func (request *Request) Compile(options *protocols.ExecutorOptions) error {
 		}
 		request.compiledUserAgent = request.CustomUserAgent
 	case useragent.Random:
-		request.compiledUserAgent = uarand.GetRandom()
+		userAgent := uagent.PickRandom()
+		request.compiledUserAgent = userAgent.Raw
 	}
 
 	if len(request.Matchers) > 0 || len(request.Extractors) > 0 {

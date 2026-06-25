@@ -8,6 +8,7 @@ import (
 	"github.com/projectdiscovery/nuclei/v3/pkg/output"
 	"github.com/projectdiscovery/nuclei/v3/pkg/protocols"
 	"github.com/projectdiscovery/nuclei/v3/pkg/scan"
+	mapsutil "github.com/projectdiscovery/utils/maps"
 )
 
 // generic engine as name suggests is a generic template
@@ -41,9 +42,15 @@ func (g *Generic) ExecuteWithResults(ctx *scan.ScanContext) error {
 			dynamicValues[key] = value
 		})
 	}
-	previous := make(map[string]interface{})
+	previous := mapsutil.NewSyncLockMap[string, any]()
 
 	for _, req := range g.requests {
+		select {
+		case <-ctx.Context().Done():
+			return ctx.Context().Err()
+		default:
+		}
+
 		inputItem := ctx.Input.Clone()
 		if g.options.InputHelper != nil && ctx.Input.MetaInput.Input != "" {
 			if inputItem.MetaInput.Input = g.options.InputHelper.Transform(inputItem.MetaInput.Input, req.Type()); inputItem.MetaInput.Input == "" {
@@ -51,7 +58,8 @@ func (g *Generic) ExecuteWithResults(ctx *scan.ScanContext) error {
 			}
 		}
 
-		err := req.ExecuteWithResults(inputItem, dynamicValues, previous, func(event *output.InternalWrappedEvent) {
+		err := req.ExecuteWithResults(inputItem, dynamicValues, output.InternalEvent(previous.GetAll()), func(event *output.InternalWrappedEvent) {
+			// this callback is not concurrent safe so mutex should be used to synchronize
 			if event == nil {
 				// ideally this should never happen since protocol exits on error and callback is not called
 				return
@@ -63,7 +71,7 @@ func (g *Generic) ExecuteWithResults(ctx *scan.ScanContext) error {
 					builder.WriteString(ID)
 					builder.WriteString("_")
 					builder.WriteString(k)
-					previous[builder.String()] = v
+					_ = previous.Set(builder.String(), v)
 					builder.Reset()
 				}
 			}
@@ -77,7 +85,7 @@ func (g *Generic) ExecuteWithResults(ctx *scan.ScanContext) error {
 		if err != nil {
 			ctx.LogError(err)
 			if g.options.HostErrorsCache != nil {
-				g.options.HostErrorsCache.MarkFailed(ctx.Input.MetaInput.ID(), err)
+				g.options.HostErrorsCache.MarkFailed(g.options.ProtocolType.String(), ctx.Input, err)
 			}
 			gologger.Warning().Msgf("[%s] Could not execute request for %s: %s\n", g.options.TemplateID, ctx.Input.MetaInput.PrettyPrint(), err)
 		}

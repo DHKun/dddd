@@ -1,0 +1,22 @@
+id: sdk-adapter
+
+info:
+  name: SDK Adapter Test
+  author: DHKun
+  severity: info
+  tags: sdk-adapter
+
+http:
+  - raw:
+      - |
+        GET /first HTTP/1.1
+        Host: {{Hostname}}
+      - |
+        GET /second HTTP/1.1
+        Host: {{Hostname}}
+
+    matchers:
+      - type: word
+        part: body_2
+        words:
+          - matched

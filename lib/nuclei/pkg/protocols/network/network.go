@@ -45,6 +45,15 @@ type Request struct {
 	//   of payloads is provided, or optionally a single file can also
 	//   be provided as payload which will be read on run-time.
 	Payloads map[string]interface{} `yaml:"payloads,omitempty" json:"payloads,omitempty" jsonschema:"title=payloads for the network request,description=Payloads contains any payloads for the current request"`
+	// description: |
+	//   Threads specifies number of threads to use sending requests. This enables Connection Pooling.
+	//
+	//   Connection: Close attribute must not be used in request while using threads flag, otherwise
+	//   pooling will fail and engine will continue to close connections after requests.
+	// examples:
+	//   - name: Send requests using 10 concurrent threads
+	//     value: 10
+	Threads int `yaml:"threads,omitempty" json:"threads,omitempty" jsonschema:"title=threads for sending requests,description=Threads specifies number of threads to use sending requests. This enables Connection Pooling"`
 
 	// description: |
 	//   Inputs contains inputs for the network socket
@@ -52,7 +61,7 @@ type Request struct {
 	// description: |
 	//   Port is the port to send network requests to. this acts as default port but is overriden if target/input contains
 	// non-http(s) ports like 80,8080,8081 etc
-	Port string `yaml:"port,omitempty" json:"port,omitempty" jsonschema:"title=port to send requests to,description=Port to send network requests to"`
+	Port string `yaml:"port,omitempty" json:"port,omitempty" jsonschema:"title=port to send requests to,description=Port to send network requests to,oneof_type=string;integer"`
 
 	// description:	|
 	//	ExcludePorts is the list of ports to exclude from being scanned . It is intended to be used with `Port` field and contains a list of ports which are ignored/skipped
@@ -77,12 +86,16 @@ type Request struct {
 	SelfContained bool `yaml:"-" json:"-"`
 
 	// description: |
+	//   StopAtFirstMatch stops the execution of the requests and template as soon as a match is found.
+	StopAtFirstMatch bool `yaml:"stop-at-first-match,omitempty" json:"stop-at-first-match,omitempty" jsonschema:"title=stop at first match,description=Stop the execution after a match is found"`
+
+	// description: |
 	// ports is post processed list of ports to scan (obtained from Port)
 	ports []string `yaml:"-" json:"-"`
 
 	// Operators for the current request go here.
 	operators.Operators `yaml:",inline,omitempty"`
-	CompiledOperators   *operators.Operators `yaml:"-"`
+	CompiledOperators   *operators.Operators `yaml:"-" json:"-"`
 
 	generator *generators.PayloadGenerator
 	// cache any variables that may be needed for operation.
@@ -119,7 +132,7 @@ type Input struct {
 	// examples:
 	//   - value: "\"TEST\""
 	//   - value: "\"hex_decode('50494e47')\""
-	Data string `yaml:"data,omitempty" json:"data,omitempty" jsonschema:"title=data to send as input,description=Data is the data to send as the input"`
+	Data string `yaml:"data,omitempty" json:"data,omitempty" jsonschema:"title=data to send as input,description=Data is the data to send as the input,oneof_type=string;integer"`
 	// description: |
 	//   Type is the type of input specified in `data` field.
 	//
@@ -219,6 +232,8 @@ func (request *Request) Compile(options *protocols.ExecutorOptions) error {
 		if err != nil {
 			return errors.Wrap(err, "could not parse payloads")
 		}
+		// if we have payloads, adjust threads if none specified
+		request.Threads = options.GetThreadsForNPayloadRequests(request.Requests(), request.Threads)
 	}
 
 	// Create a client for the class
