@@ -66,6 +66,12 @@ jobs:
           go vet .
           go test .
 
+      - name: Run embedded Nuclei regression tests
+        working-directory: lib/nuclei
+        run: |
+          go vet ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
+          go test ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
+
       - name: Run concurrency race tests
         if: matrix.go-version == 'stable'
         shell: bash
@@ -74,6 +80,10 @@ jobs:
           (
             cd lib/gonmap
             go test -race .
+          )
+          (
+            cd lib/nuclei
+            go test -race ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
           )
 
       - name: Build packages
