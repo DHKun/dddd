@@ -202,7 +202,7 @@ Flags:
 端口扫描:
    -p, -port string              端口设置。 默认扫描Top1000
    -st, -scan-type string        端口扫描方式 | "-st tcp"设置TCP扫描 | "-st syn"设置SYN扫描 (default "tcp")
-   -tst, -tcp-scan-threads int   TCP扫描线程 | Windows/Mac默认1000线程 Linux默认4000 (default 1000)
+   -tst, -tcp-scan-threads int   TCP扫描线程 | Linux默认4000，受进程文件描述符上限约束 (default 4000)
    -sst, -syn-scan-threads int   SYN扫描线程 (default 10000)
    -mp, -masscan-path string     指定masscan程序路径 | SYN扫描依赖 (default "masscan")
    -pmc, -ports-max-count int    IP端口数量阈值 | 当一个端口的IP数量超过此数量，此IP将会被抛弃 (default 300)
@@ -277,6 +277,7 @@ HTTP代理配置:
 
 ```
 
+Linux 启动时会在硬限制允许的范围内提升 `RLIMIT_NOFILE` 软限制，并为程序自身保留文件描述符。`-tst` 的用户设置会被保留；硬限制不足时，dddd 会输出实际采用的线程数。TCP 扫描开始时会显示任务数量、并发数和按连接超时计算的最坏耗时估算。
 
 
 # 拓展
