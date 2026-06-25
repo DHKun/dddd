@@ -60,7 +60,7 @@ type Request struct {
 	// examples:
 	//   - name: Use a retry of 100 to 150 generally
 	//     value: 100
-	TraceMaxRecursion int `yaml:"trace-max-recursion,omitempty"  jsonschema:"title=trace-max-recursion level for dns request,description=TraceMaxRecursion is the number of max recursion allowed for trace operations"`
+	TraceMaxRecursion int `yaml:"trace-max-recursion,omitempty" json:"trace-max-recursion,omitempty"  jsonschema:"title=trace-max-recursion level for dns request,description=TraceMaxRecursion is the number of max recursion allowed for trace operations"`
 
 	// description: |
 	//   Attack is the type of payload combinations to perform.
@@ -74,10 +74,16 @@ type Request struct {
 	//   Payloads support both key-values combinations where a list
 	//   of payloads is provided, or optionally a single file can also
 	//   be provided as payload which will be read on run-time.
-	Payloads  map[string]interface{} `yaml:"payloads,omitempty" json:"payloads,omitempty" jsonschema:"title=payloads for the network request,description=Payloads contains any payloads for the current request"`
+	Payloads map[string]interface{} `yaml:"payloads,omitempty" json:"payloads,omitempty" jsonschema:"title=payloads for the network request,description=Payloads contains any payloads for the current request"`
+	// description: |
+	//    Threads to use when sending iterating over payloads
+	// examples:
+	//   - name: Send requests using 10 concurrent threads
+	//     value: 10
+	Threads   int `yaml:"threads,omitempty" json:"threads,omitempty" jsonschema:"title=threads for sending requests,description=Threads specifies number of threads to use sending requests. This enables Connection Pooling"`
 	generator *generators.PayloadGenerator
 
-	CompiledOperators *operators.Operators `yaml:"-"`
+	CompiledOperators *operators.Operators `yaml:"-" json:"-"`
 	dnsClient         *retryabledns.Client
 	options           *protocols.ExecutorOptions
 
@@ -135,12 +141,6 @@ func (request *Request) Compile(options *protocols.ExecutorOptions) error {
 		recursion := true
 		request.Recursion = &recursion
 	}
-	dnsClientOptions := &dnsclientpool.Configuration{
-		Retries: request.Retries,
-	}
-	if len(request.Resolvers) > 0 {
-		dnsClientOptions.Resolvers = request.Resolvers
-	}
 	// Create a dns client for the class
 	client, err := request.getDnsClient(options, nil)
 	if err != nil {
@@ -176,6 +176,8 @@ func (request *Request) Compile(options *protocols.ExecutorOptions) error {
 		if err != nil {
 			return errors.Wrap(err, "could not parse payloads")
 		}
+		// default to 20 threads for payload requests
+		request.Threads = options.GetThreadsForNPayloadRequests(request.Requests(), request.Threads)
 	}
 	return nil
 }
@@ -267,6 +269,8 @@ func questionTypeToInt(questionType string) uint16 {
 		question = dns.TypeTLSA
 	case "ANY":
 		question = dns.TypeANY
+	case "SRV":
+		question = dns.TypeSRV
 	}
 	return question
 }

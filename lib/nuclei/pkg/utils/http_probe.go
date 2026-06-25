@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/corpix/uarand"
 	"github.com/projectdiscovery/httpx/common/httpx"
+	"github.com/projectdiscovery/nuclei/v3/pkg/input/types"
+	"github.com/projectdiscovery/useragent"
 )
 
 var (
 	HttpSchemes = []string{"https", "http"}
 )
 
-// probeURL probes the scheme for a URL. first HTTPS is tried
+// ProbeURL probes the scheme for a URL. first HTTPS is tried
 // and if any errors occur http is tried. If none succeeds, probing
 // is abandoned for such URLs.
 func ProbeURL(input string, httpxclient *httpx.HTTPX) string {
@@ -22,12 +23,36 @@ func ProbeURL(input string, httpxclient *httpx.HTTPX) string {
 		if err != nil {
 			continue
 		}
-		req.Header.Set("User-Agent", uarand.GetRandom())
+		userAgent := useragent.PickRandom()
+		req.Header.Set("User-Agent", userAgent.Raw)
 
 		if _, err = httpxclient.Do(req, httpx.UnsafeOptions{}); err != nil {
 			continue
 		}
+
 		return formedURL
 	}
 	return ""
+}
+
+type inputLivenessChecker struct {
+	client *httpx.HTTPX
+}
+
+// ProbeURL probes the scheme for a URL. first HTTPS is tried
+func (i *inputLivenessChecker) ProbeURL(input string) (string, error) {
+	return ProbeURL(input, i.client), nil
+}
+
+func (i *inputLivenessChecker) Close() error {
+	if i.client.Dialer != nil {
+		i.client.Dialer.Close()
+	}
+	return nil
+}
+
+// GetInputLivenessChecker returns a new input liveness checker using provided httpx client
+func GetInputLivenessChecker(client *httpx.HTTPX) types.InputLivenessProbe {
+	x := &inputLivenessChecker{client: client}
+	return x
 }

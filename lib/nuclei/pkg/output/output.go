@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,14 +29,14 @@ import (
 	"github.com/projectdiscovery/nuclei/v3/pkg/operators"
 	protocolUtils "github.com/projectdiscovery/nuclei/v3/pkg/protocols/utils"
 	"github.com/projectdiscovery/nuclei/v3/pkg/types"
+	"github.com/projectdiscovery/nuclei/v3/pkg/types/nucleierr"
 	"github.com/projectdiscovery/nuclei/v3/pkg/utils"
+	"github.com/projectdiscovery/utils/errkit"
 	fileutil "github.com/projectdiscovery/utils/file"
 	osutils "github.com/projectdiscovery/utils/os"
+	unitutils "github.com/projectdiscovery/utils/unit"
+	urlutil "github.com/projectdiscovery/utils/url"
 )
-
-var Results []ResultEvent
-var ResultsLock sync.Mutex
-var AddResultCallback func(result ResultEvent)
 
 // Writer is an interface which writes output to somewhere for nuclei events.
 type Writer interface {
@@ -70,12 +72,17 @@ type StandardWriter struct {
 	omitTemplate          bool
 	DisableStdout         bool
 	AddNewLinesOutputFile bool // by default this is only done for stdout
+	KeysToRedact          []string
 }
 
 var decolorizerRegex = regexp.MustCompile(`\x1B\[[0-9;]*[a-zA-Z]`)
 
 // InternalEvent is an internal output generation structure for nuclei.
 type InternalEvent map[string]interface{}
+
+func (ie InternalEvent) Set(k string, v interface{}) {
+	ie[k] = v
+}
 
 // InternalWrappedEvent is a wrapped event with operators result added to it.
 type InternalWrappedEvent struct {
@@ -91,6 +98,15 @@ type InternalWrappedEvent struct {
 	// Only applicable if interactsh is used
 	// This is used to avoid duplicate successful interactsh events
 	InteractshMatched atomic.Bool
+}
+
+func (iwe *InternalWrappedEvent) CloneShallow() *InternalWrappedEvent {
+	return &InternalWrappedEvent{
+		InternalEvent:   maps.Clone(iwe.InternalEvent),
+		Results:         nil,
+		OperatorsResult: nil,
+		UsesInteractsh:  iwe.UsesInteractsh,
+	}
 }
 
 func (iwe *InternalWrappedEvent) HasOperatorResult() bool {
@@ -114,9 +130,11 @@ func (iwe *InternalWrappedEvent) SetOperatorResult(operatorResult *operators.Res
 	iwe.OperatorsResult = operatorResult
 }
 
+// RequestResponsePair contains one request/response exchange from a chained
+// template execution.
 type RequestResponsePair struct {
-	Request string
-	Response string
+	Request  string `json:"request,omitempty"`
+	Response string `json:"response,omitempty"`
 }
 
 // ResultEvent is a wrapped result event for a single nuclei output.
@@ -158,7 +176,7 @@ type ResultEvent struct {
 	Request string `json:"request,omitempty"`
 	// Response is the optional, dumped response for the match.
 	Response string `json:"response,omitempty"`
-	// Packet is the optional, dumped requests and responses for the match. The request and response are one-to-one.
+	// Packet contains all numbered request/response exchanges for chained HTTP templates.
 	Packet map[int]RequestResponsePair `json:"packet,omitempty"`
 	// Metadata contains any optional metadata for the event
 	Metadata map[string]interface{} `json:"meta,omitempty"`
@@ -175,9 +193,35 @@ type ResultEvent struct {
 	MatcherStatus bool `json:"matcher-status"`
 	// Lines is the line count for the specified match
 	Lines []int `json:"matched-line,omitempty"`
+	// GlobalMatchers identifies whether the matches was detected in the response
+	// of another template's result event
+	GlobalMatchers bool `json:"global-matchers,omitempty"`
+
+	// IssueTrackers is the metadata for issue trackers
+	IssueTrackers map[string]IssueTrackerMetadata `json:"issue_trackers,omitempty"`
+	// ReqURLPattern when enabled contains base URL pattern that was used to generate the request
+	// must be enabled by setting protocols.ExecuterOptions.ExportReqURLPattern to true
+	ReqURLPattern string `json:"req_url_pattern,omitempty"`
+
+	// Fields related to HTTP Fuzzing functionality of nuclei.
+	// The output contains additional fields when the result is
+	// for a fuzzing template.
+	IsFuzzingResult  bool   `json:"is_fuzzing_result,omitempty"`
+	FuzzingMethod    string `json:"fuzzing_method,omitempty"`
+	FuzzingParameter string `json:"fuzzing_parameter,omitempty"`
+	FuzzingPosition  string `json:"fuzzing_position,omitempty"`
+	AnalyzerDetails  string `json:"analyzer_details,omitempty"`
 
 	FileToIndexPosition map[string]int `json:"-"`
+	TemplateVerifier    string         `json:"-"`
 	Error               string         `json:"error,omitempty"`
+}
+
+type IssueTrackerMetadata struct {
+	// IssueID is the ID of the issue created
+	IssueID string `json:"id,omitempty"`
+	// IssueURL is the URL of the issue created
+	IssueURL string `json:"url,omitempty"`
 }
 
 // NewStandardWriter creates a new output writer based on user configurations
@@ -234,6 +278,7 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 		storeResponse:    options.StoreResponse,
 		storeResponseDir: options.StoreResponseDir,
 		omitTemplate:     options.OmitTemplate,
+		KeysToRedact:     options.Redact,
 	}
 	return writer, nil
 }
@@ -242,15 +287,17 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 func (w *StandardWriter) Write(event *ResultEvent) error {
 	// Enrich the result event with extra metadata on the template-path and url.
 	if event.TemplatePath != "" {
-		event.Template, event.TemplateURL = utils.TemplatePathURL(types.ToString(event.TemplatePath), types.ToString(event.TemplateID))
+		event.Template, event.TemplateURL = utils.TemplatePathURL(types.ToString(event.TemplatePath), types.ToString(event.TemplateID), event.TemplateVerifier)
+	}
+
+	if len(w.KeysToRedact) > 0 {
+		event.Request = redactKeys(event.Request, w.KeysToRedact)
+		event.Response = redactKeys(event.Response, w.KeysToRedact)
+		event.CURLCommand = redactKeys(event.CURLCommand, w.KeysToRedact)
+		event.Matched = redactKeys(event.Matched, w.KeysToRedact)
 	}
 
 	event.Timestamp = time.Now()
-
-	AddResultCallback(*event)
-	ResultsLock.Lock()
-	Results = append(Results, *event)
-	ResultsLock.Unlock()
 
 	var data []byte
 	var err error
@@ -288,12 +335,24 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 	return nil
 }
 
+func redactKeys(data string, keysToRedact []string) string {
+	for _, key := range keysToRedact {
+		keyPattern := regexp.MustCompile(fmt.Sprintf(`(?i)(%s\s*[:=]\s*["']?)[^"'\r\n&]+(["'\r\n]?)`, regexp.QuoteMeta(key)))
+		data = keyPattern.ReplaceAllString(data, `$1***$2`)
+	}
+	return data
+}
+
 // JSONLogRequest is a trace/error log request written to file
 type JSONLogRequest struct {
-	Template string `json:"template"`
-	Input    string `json:"input"`
-	Error    string `json:"error"`
-	Type     string `json:"type"`
+	Template  string      `json:"template"`
+	Type      string      `json:"type"`
+	Input     string      `json:"input"`
+	Timestamp *time.Time  `json:"timestamp,omitempty"`
+	Address   string      `json:"address"`
+	Error     string      `json:"error"`
+	Kind      string      `json:"kind,omitempty"`
+	Attrs     interface{} `json:"attrs,omitempty"`
 }
 
 // Request writes a log the requests trace log
@@ -306,12 +365,47 @@ func (w *StandardWriter) Request(templatePath, input, requestType string, reques
 		Input:    input,
 		Type:     requestType,
 	}
-	if unwrappedErr := utils.UnwrapError(requestErr); unwrappedErr != nil {
-		request.Error = unwrappedErr.Error()
-	} else {
-		request.Error = "none"
+	if w.timestamp {
+		ts := time.Now()
+		request.Timestamp = &ts
 	}
-
+	parsed, _ := urlutil.ParseAbsoluteURL(input, false)
+	if parsed != nil {
+		request.Address = parsed.Hostname()
+		port := parsed.Port()
+		if port == "" {
+			switch parsed.Scheme {
+			case urlutil.HTTP:
+				port = "80"
+			case urlutil.HTTPS:
+				port = "443"
+			}
+		}
+		request.Address += ":" + port
+	}
+	errX := errkit.FromError(requestErr)
+	if errX == nil {
+		request.Error = "none"
+	} else {
+		request.Kind = errkit.ErrKindUnknown.String()
+		var cause error
+		if len(errX.Errors()) > 1 {
+			cause = errX.Errors()[0]
+		}
+		if cause == nil {
+			cause = errX
+		}
+		cause = tryParseCause(cause)
+		request.Error = cause.Error()
+		request.Kind = errkit.GetErrorKind(requestErr, nucleierr.ErrTemplateLogic).String()
+		if len(errX.Attrs()) > 0 {
+			request.Attrs = slog.GroupValue(errX.Attrs()...)
+		}
+	}
+	// check if address slog attr is avaiable in error if set use it
+	if val := errkit.GetAttrValue(requestErr, "address"); val.Any() != nil {
+		request.Address = val.String()
+	}
 	data, err := jsoniter.Marshal(request)
 	if err != nil {
 		return
@@ -365,7 +459,7 @@ func (w *StandardWriter) WriteFailure(wrappedEvent *InternalWrappedEvent) error 
 	// if no results were found, manually create a failure event
 	event := wrappedEvent.InternalEvent
 
-	templatePath, templateURL := utils.TemplatePathURL(types.ToString(event["template-path"]), types.ToString(event["template-id"]))
+	templatePath, templateURL := utils.TemplatePathURL(types.ToString(event["template-path"]), types.ToString(event["template-id"]), types.ToString(event["template-verifier"]))
 	var templateInfo model.Info
 	if event["template-info"] != nil {
 		templateInfo = event["template-info"].(model.Info)
@@ -402,7 +496,7 @@ func (w *StandardWriter) WriteFailure(wrappedEvent *InternalWrappedEvent) error 
 	return w.Write(data)
 }
 
-var maxTemplateFileSizeForEncoding = 1024 * 1024
+var maxTemplateFileSizeForEncoding = unitutils.Mega
 
 func (w *StandardWriter) encodeTemplate(templatePath string) string {
 	data, err := os.ReadFile(templatePath)
@@ -442,4 +536,25 @@ func (w *StandardWriter) WriteStoreDebugData(host, templateID, eventType string,
 		f.Close()
 	}
 
+}
+
+// tryParseCause tries to parse the cause of given error
+// this is legacy support due to use of errorutil in existing libraries
+// but this should not be required once all libraries are updated
+func tryParseCause(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.HasPrefix(msg, "ReadStatusLine:") {
+		// last index is actual error (from rawhttp)
+		parts := strings.Split(msg, ":")
+		return errkit.New("%s", strings.TrimSpace(parts[len(parts)-1]))
+	}
+	if strings.Contains(msg, "read ") {
+		// same here
+		parts := strings.Split(msg, ":")
+		return errkit.New("%s", strings.TrimSpace(parts[len(parts)-1]))
+	}
+	return err
 }
