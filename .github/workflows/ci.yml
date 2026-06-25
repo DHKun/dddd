@@ -69,8 +69,8 @@ jobs:
       - name: Run embedded Nuclei regression tests
         working-directory: lib/nuclei
         run: |
-          go vet ./pkg/catalog/loader ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
-          go test ./pkg/catalog/loader ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
+          go vet ./pkg/catalog/loader ./pkg/protocols/common/automaticscan ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
+          go test ./pkg/catalog/loader ./pkg/protocols/common/automaticscan ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
 
       - name: Run concurrency race tests
         if: matrix.go-version == 'stable'
@@ -83,7 +83,7 @@ jobs:
           )
           (
             cd lib/nuclei
-            go test -race ./pkg/catalog/loader ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
+            go test -race ./pkg/catalog/loader ./pkg/protocols/common/automaticscan ./pkg/protocols/common/protocolstate ./pkg/js/libs/mysql
           )
 
       - name: Build packages

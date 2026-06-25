@@ -61,6 +61,9 @@ func getTemplatePathByFS(f embed.FS) ([]string, error) {
 		}
 		return nil
 	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return files, nil
+	}
 	return files, err
 }
 

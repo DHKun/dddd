@@ -259,6 +259,7 @@ HTTP代理配置:
    -gpt, -golang-poc-threads int  GoPoc运行线程 (default 50)
    -ngp, -no-golang-poc           关闭Golang Poc探测
    -dgp, -disable-general-poc     禁用无视指纹的漏洞映射
+   -external-poc-only             仅加载-nt和-wy指定的外部Poc与workflow，并禁用内置GoPoc
 
 配置文件:
    -acf, -api-config-file string      API配置文件 (default "config/api-config.yaml")
@@ -465,6 +466,8 @@ dddd内置了2400+ poc，如果需要添加poc可以将新增poc存放在`config
 
 PS: 当外置的poc和内置的poc发生冲突时，dddd会优先使用外置的。
 
+使用`--external-poc-only`后，扫描范围限定为`-nt`指定目录中的Poc，同时关闭内置GoPoc。
+
 ### 工作流(workflow)
 
 工作流（workflow）可以理解成指纹与Poc的映射。
@@ -476,6 +479,8 @@ PS: 当外置的poc和内置的poc发生冲突时，dddd会优先使用外置的
 dddd内置了一份工作流，如果需要拓展，可以新建一个工作流文件在`config/workflow.yaml`，dddd会自动识别并用于补充内置的工作流。
 
 当然，您也可以使用`-wy`参数指定一个您喜欢的工作流数据库路径。
+
+使用`--external-poc-only`后，工作流范围限定为`-wy`指定的文件。
 
 
 

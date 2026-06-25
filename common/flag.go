@@ -149,98 +149,60 @@ func IsLinux() bool {
 //go:embed config/workflow.yaml
 var EmbedWorkFlowData string
 
-func ReadWorkFlowDB() {
-	structs.WorkFlowDB = make(map[string]structs.WorkFlowEntity)
-	fps := make(map[string]interface{})
-	err := yaml.Unmarshal([]byte(EmbedWorkFlowData), &fps)
-	if err == nil {
-		for productName, rulesInterface := range fps {
-			var workflowEntity structs.WorkFlowEntity
-			ruleInterface := rulesInterface.(map[string]interface{})
-			types := ruleInterface["type"]
-			pocs := ruleInterface["pocs"]
-			for _, v := range types.([]interface{}) {
-				vString := v.(string)
-				if strings.ToLower(vString) == "root" {
-					workflowEntity.RootType = true
-				} else if strings.ToLower(vString) == "dir" {
-					workflowEntity.DirType = true
-				} else if strings.ToLower(vString) == "base" {
-					workflowEntity.BaseType = true
-				}
-			}
-			for _, v := range pocs.([]interface{}) {
-				vString := v.(string)
-				workflowEntity.PocsName = append(workflowEntity.PocsName, vString)
-			}
-			workflowEntity.PocsName = utils.RemoveDuplicateElement(workflowEntity.PocsName)
-			structs.WorkFlowDB[productName] = workflowEntity
-		}
+type workflowRule struct {
+	Type []string `yaml:"type"`
+	Pocs []string `yaml:"pocs"`
+}
+
+func mergeWorkFlowData(data []byte, workFlowDB map[string]structs.WorkFlowEntity) error {
+	fps := make(map[string]workflowRule)
+	if err := yaml.Unmarshal(data, &fps); err != nil {
+		return err
 	}
 
-	workflowPath := "config/workflow.yaml"
+	for productName, rule := range fps {
+		workflowEntity := workFlowDB[productName]
+		for _, workflowType := range rule.Type {
+			switch strings.ToLower(workflowType) {
+			case "root":
+				workflowEntity.RootType = true
+			case "dir":
+				workflowEntity.DirType = true
+			case "base":
+				workflowEntity.BaseType = true
+			}
+		}
+		workflowEntity.PocsName = append(workflowEntity.PocsName, rule.Pocs...)
+		workflowEntity.PocsName = utils.RemoveDuplicateElement(workflowEntity.PocsName)
+		workFlowDB[productName] = workflowEntity
+	}
+	return nil
+}
 
-	var data []byte
+func ReadWorkFlowDB() {
+	structs.WorkFlowDB = make(map[string]structs.WorkFlowEntity)
+	if !structs.GlobalConfig.ExternalPocOnly {
+		_ = mergeWorkFlowData([]byte(EmbedWorkFlowData), structs.WorkFlowDB)
+	}
+
+	workflowPath := structs.GlobalConfig.WorkflowYamlPath
 	if !fileExists(workflowPath) {
 		return
 	}
-	data, err = os.ReadFile(workflowPath)
+	data, err := os.ReadFile(workflowPath)
 	if err != nil {
 		return
 	}
-	fps = make(map[string]interface{})
-	err = yaml.Unmarshal(data, &fps)
-	if err != nil {
-		return
-	}
+	_ = mergeWorkFlowData(data, structs.WorkFlowDB)
+}
 
-	for productName, rulesInterface := range fps {
-		_, ok := structs.WorkFlowDB[productName]
-		if ok {
-			we, _ := structs.WorkFlowDB[productName]
-			ruleInterface := rulesInterface.(map[string]interface{})
-			types := ruleInterface["type"]
-			pocs := ruleInterface["pocs"]
-			for _, v := range types.([]interface{}) {
-				vString := v.(string)
-				if strings.ToLower(vString) == "root" {
-					we.RootType = true
-				} else if strings.ToLower(vString) == "dir" {
-					we.DirType = true
-				} else if strings.ToLower(vString) == "base" {
-					we.BaseType = true
-				}
-			}
-			for _, v := range pocs.([]interface{}) {
-				vString := v.(string)
-				if utils.GetItemInArray(we.PocsName, vString) == -1 {
-					we.PocsName = append(we.PocsName, vString)
-				}
-			}
-			structs.WorkFlowDB[productName] = we
-		} else {
-			var workflowEntity structs.WorkFlowEntity
-			ruleInterface := rulesInterface.(map[string]interface{})
-			types := ruleInterface["type"]
-			pocs := ruleInterface["pocs"]
-			for _, v := range types.([]interface{}) {
-				vString := v.(string)
-				if strings.ToLower(vString) == "root" {
-					workflowEntity.RootType = true
-				} else if strings.ToLower(vString) == "dir" {
-					workflowEntity.DirType = true
-				} else if strings.ToLower(vString) == "base" {
-					workflowEntity.BaseType = true
-				}
-			}
-			for _, v := range pocs.([]interface{}) {
-				vString := v.(string)
-				workflowEntity.PocsName = append(workflowEntity.PocsName, vString)
-			}
-			workflowEntity.PocsName = utils.RemoveDuplicateElement(workflowEntity.PocsName)
-			structs.WorkFlowDB[productName] = workflowEntity
-		}
+func configurePocSources() {
+	structs.GlobalEmbedPocs = embed.FS{}
+	if structs.GlobalConfig.ExternalPocOnly {
+		structs.GlobalConfig.NoGolangPoc = true
+		return
 	}
+	structs.GlobalEmbedPocs = EmbedNucleiPocs
 }
 
 func prepare() {
@@ -263,7 +225,7 @@ func prepare() {
 		gologger.Fatal().Msg("API配置文件需要以 .yaml 为拓展名。")
 	}
 
-	structs.GlobalEmbedPocs = EmbedNucleiPocs
+	configurePocSources()
 
 	// 进行需要配置API的活动，没有找到API配置文件则直接进行生成
 	if structs.GlobalConfig.Fofa || structs.GlobalConfig.Hunter || structs.GlobalConfig.Quake || (structs.GlobalConfig.Subdomain && !structs.GlobalConfig.NoSubFinder) {
@@ -604,6 +566,7 @@ func Flag() {
 		flagSet.IntVarP(&structs.GlobalConfig.GoPocThreads, "golang-poc-threads", "gpt", 50, "GoPoc运行线程"),
 		flagSet.BoolVarP(&structs.GlobalConfig.NoGolangPoc, "no-golang-poc", "ngp", false, "关闭Golang Poc探测"),
 		flagSet.BoolVarP(&structs.GlobalConfig.DisableGeneralPoc, "disable-general-poc", "dgp", false, "禁用无视指纹的漏洞映射"),
+		flagSet.BoolVar(&structs.GlobalConfig.ExternalPocOnly, "external-poc-only", false, "仅加载-nt和-wy指定的外部Poc与workflow，并禁用内置GoPoc"),
 		flagSet.StringVarP(&structs.GlobalConfig.ExcludeTags, "exclude-tags", "et", "", "通过tags排除模版 | 多个tags请用,连接"),
 		flagSet.StringVarP(&structs.GlobalConfig.Severities, "severity", "s", "", "只允许指定严重程度的模板运行 | 多参数用,连接 | 允许的值: "+strings.ReplaceAll(severity.GetSupportedSeverities().String(), " ", "")),
 		flagSet.BoolVarP(&structs.GlobalConfig.NoServiceBruteForce, "no-brute", "nb", false, "禁用服务爆破 | 不包括Shiro Keys"),
@@ -678,6 +641,7 @@ func flagAudit() {
 	gologger.AuditLogger("ReportName: %v", structs.GlobalConfig.ReportName)
 	gologger.AuditLogger("GoPocThreads: %v", structs.GlobalConfig.GoPocThreads)
 	gologger.AuditLogger("NoGolangPoc: %v", structs.GlobalConfig.NoGolangPoc)
+	gologger.AuditLogger("ExternalPocOnly: %v", structs.GlobalConfig.ExternalPocOnly)
 	gologger.AuditLogger("PocNameForSearch: %v", structs.GlobalConfig.PocNameForSearch)
 	gologger.AuditLogger("NoPoc: %v", structs.GlobalConfig.NoPoc)
 	gologger.AuditLogger("NoInteractsh: %v", structs.GlobalConfig.NoInteractsh)

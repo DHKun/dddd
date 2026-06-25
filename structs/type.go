@@ -51,6 +51,7 @@ type Config struct {
 	DirSearchYaml              string
 	NoGolangPoc                bool
 	DisableGeneralPoc          bool
+	ExternalPocOnly            bool
 	NucleiTemplate             string
 	ExcludeTags                string
 	Severities                 string
