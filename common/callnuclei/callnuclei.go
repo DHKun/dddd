@@ -441,10 +441,10 @@ func readConfig(param NucleiParams) {
 	options.RateLimit = 150
 	// 每分钟最大请求量
 	options.RateLimitMinute = 0
-	// 每个模板最大并行检测数（默认：25）
-	options.BulkSize = 64
-	// 并行执行的最大模板数量（默认：25）
-	options.TemplateThreads = 64
+	// 每个模板最大并行检测数（Nuclei默认：25）
+	options.BulkSize = 25
+	// 并行执行的最大模板数量（Nuclei默认：25）
+	options.TemplateThreads = 25
 	// 每个模板并行运行的无头主机最大数量（默认：10）
 	options.HeadlessBulkSize = 10
 	// 并行指定无头主机最大数量（默认：10）
