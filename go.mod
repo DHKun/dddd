@@ -314,7 +314,7 @@ require (
 // nuclei
 require (
 	github.com/projectdiscovery/interactsh v1.1.8 // indirect
-	github.com/projectdiscovery/nuclei/v3 v3.0.2
+	github.com/projectdiscovery/nuclei/v3 v3.1.8
 )
 
 replace (
@@ -322,7 +322,7 @@ replace (
 	github.com/projectdiscovery/dnsx v1.1.6 => ./lib/dnsx
 	github.com/projectdiscovery/gologger v1.1.12 => ./lib/gologger
 	github.com/projectdiscovery/httpx v1.3.5 => ./lib/httpx
-	github.com/projectdiscovery/nuclei/v3 v3.0.2 => ./lib/nuclei
+	github.com/projectdiscovery/nuclei/v3 v3.1.8 => ./lib/nuclei
 	github.com/projectdiscovery/subfinder/v2 v2.6.5 => ./lib/subfinder/v2
 	github.com/tomatome/grdp v0.1.0 => github.com/shadow1ng/grdp v1.0.3
 )

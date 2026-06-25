@@ -1,0 +1,46 @@
+id: compatibility-v3-3-style
+
+info:
+  name: Nuclei v3.3 Style Compatibility Fixture
+  author: DHKun
+  severity: info
+  tags: compatibility-v3-3
+
+variables:
+  account: "{{rand_base(6)}}"
+  password: "Test123!"
+
+http:
+  - raw:
+      - |
+        GET /compat/session HTTP/1.1
+        Host: {{Hostname}}
+      - |
+        POST /compat/users HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"account":"{{account}}","password":"{{password}}"}
+      - |
+        GET /compat/users/{{account}} HTTP/1.1
+        Host: {{Hostname}}
+
+    extractors:
+      - type: kval
+        name: session_cookie
+        part: header_1
+        internal: true
+        kval:
+          - Set_Cookie
+      - type: json
+        name: created_account
+        part: body_2
+        internal: true
+        json:
+          - .account
+
+    matchers:
+      - type: word
+        part: body_3
+        words:
+          - "{{account}}"
