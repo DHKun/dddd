@@ -136,8 +136,12 @@ func Init(options *types.Options) error {
 	}
 	Dialer = dialer
 
-	// override dialer in mysql
-	mysql.RegisterDialContext("tcp", func(ctx context.Context, addr string) (net.Conn, error) {
+	// Register an isolated MySQL network so SDK users keep the standard "tcp"
+	// dialer owned by their application.
+	mysql.RegisterDialContext("nucleitcp", func(ctx context.Context, addr string) (net.Conn, error) {
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			addr += ":3306"
+		}
 		return Dialer.Dial(ctx, "tcp", addr)
 	})
 

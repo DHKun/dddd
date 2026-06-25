@@ -22,6 +22,8 @@ import (
 // Internally client uses go-sql-driver/mysql driver.
 type MySQLClient struct{}
 
+const nucleiMySQLNetwork = "nucleitcp"
+
 // Connect connects to MySQL database using given credentials.
 //
 // If connection is successful, it returns true.
@@ -71,6 +73,10 @@ func (c *MySQLClient) ConnectWithDB(host string, port int, username, password, d
 // ConnectWithDSN connects to MySQL database using given DSN.
 // we override mysql dialer with fastdialer so it respects network policy
 func (c *MySQLClient) ConnectWithDSN(dsn string) (bool, error) {
+	dsn, err := normalizeNucleiMySQLDSN(dsn)
+	if err != nil {
+		return false, err
+	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return false, err
@@ -98,9 +104,10 @@ func connect(host string, port int, username, password, dbName string) (bool, er
 
 	target := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
-	db, err := sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v)/%s?allowOldPasswords=1",
+	db, err := sql.Open("mysql", fmt.Sprintf("%v:%v@%s(%v)/%s?allowOldPasswords=1",
 		url.PathEscape(username),
 		url.PathEscape(password),
+		nucleiMySQLNetwork,
 		target,
 		dbName))
 	if err != nil {
@@ -128,9 +135,10 @@ func (c *MySQLClient) ExecuteQuery(host string, port int, username, password, db
 
 	target := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
-	db, err := sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v)/%s",
+	db, err := sql.Open("mysql", fmt.Sprintf("%v:%v@%s(%v)/%s",
 		url.PathEscape(username),
 		url.PathEscape(password),
+		nucleiMySQLNetwork,
 		target,
 		dbName))
 	if err != nil {
@@ -149,6 +157,17 @@ func (c *MySQLClient) ExecuteQuery(host string, port int, username, password, db
 		return "", err
 	}
 	return string(resp), nil
+}
+
+func normalizeNucleiMySQLDSN(dsn string) (string, error) {
+	config, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return "", err
+	}
+	if config.Net == "tcp" {
+		config.Net = nucleiMySQLNetwork
+	}
+	return config.FormatDSN(), nil
 }
 
 func init() {
