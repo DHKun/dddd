@@ -5,7 +5,6 @@ import (
 	"dddd/ddout"
 	"dddd/structs"
 	_ "embed"
-	"errors"
 	"fmt"
 	"github.com/projectdiscovery/gologger"
 	"github.com/tomatome/grdp/core"
@@ -30,6 +29,27 @@ var rdpUserPasswdDict string
 type Brutelist struct {
 	user string
 	pass string
+}
+
+type rdpLoginState struct {
+	once sync.Once
+	done chan error
+}
+
+func newRDPLoginState() *rdpLoginState {
+	return &rdpLoginState{
+		done: make(chan error, 1),
+	}
+}
+
+func (s *rdpLoginState) finish(err error) {
+	s.once.Do(func() {
+		s.done <- err
+	})
+}
+
+func (s *rdpLoginState) recoverProtocolPanic(event interface{}, _ interface{}, err error) {
+	s.finish(fmt.Errorf("rdp protocol panic during event %v: %w", event, err))
 }
 
 func RdpScan(info *structs.HostInfo) (tmperr error) {
@@ -58,12 +78,7 @@ func RdpScan(info *structs.HostInfo) (tmperr error) {
 	}
 
 	close(brlist)
-	go func() {
-		wg.Wait()
-		signal = true
-	}()
-	for !signal {
-	}
+	wg.Wait()
 
 	return tmperr
 }
@@ -74,7 +89,7 @@ func worker(host, domain string, port int, wg *sync.WaitGroup, brlist chan Brute
 		if *signal == true {
 			return
 		}
-		go incrNum(num, mutex)
+		incrNum(num, mutex)
 		user, pass := one.user, one.pass
 		gologger.AuditTimeLogger("[Go] [RDP-Brute] start try %s:%v %v %v", host, port, user, pass)
 
@@ -160,7 +175,12 @@ func NewClient(host string, logLevel glog.LEVEL) *Client {
 }
 
 func (g *Client) Login(domain, user, pwd string, timeout int64) error {
-	conn, err := common.WrapperTcpWithTimeout("tcp", g.Host, time.Duration(timeout)*time.Second)
+	timeoutDuration := time.Duration(timeout) * time.Second
+	if timeoutDuration <= 0 {
+		timeoutDuration = 6 * time.Second
+	}
+
+	conn, err := common.WrapperTcpWithTimeout("tcp", g.Host, timeoutDuration)
 	defer func() {
 		if conn != nil {
 			conn.Close()
@@ -168,6 +188,9 @@ func (g *Client) Login(domain, user, pwd string, timeout int64) error {
 	}()
 	if err != nil {
 		return fmt.Errorf("[dial err] %v", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeoutDuration)); err != nil {
+		return fmt.Errorf("[deadline err] %v", err)
 	}
 	glog.Info(conn.LocalAddr().String())
 
@@ -186,6 +209,33 @@ func (g *Client) Login(domain, user, pwd string, timeout int64) error {
 	g.sec.SetFastPathListener(g.pdu)
 	g.pdu.SetFastPathSender(g.tpkt)
 
+	state := newRDPLoginState()
+	g.tpkt.RecoverWith(state.recoverProtocolPanic)
+	g.x224.RecoverWith(state.recoverProtocolPanic)
+	g.mcs.RecoverWith(state.recoverProtocolPanic)
+	g.sec.RecoverWith(state.recoverProtocolPanic)
+	g.pdu.RecoverWith(state.recoverProtocolPanic)
+
+	g.pdu.On("error", func(err error) {
+		glog.Error("error", err)
+		state.finish(err)
+	})
+	g.pdu.On("close", func() {
+		glog.Info("on close")
+		state.finish(fmt.Errorf("rdp connection closed"))
+	})
+	g.pdu.On("success", func() {
+		glog.Info("on success")
+		state.finish(nil)
+	})
+	g.pdu.On("ready", func() {
+		glog.Info("on ready")
+		state.finish(nil)
+	})
+	g.pdu.On("update", func(rectangles []pdu.BitmapData) {
+		glog.Info("on update:", rectangles)
+	})
+
 	//g.x224.SetRequestedProtocol(x224.PROTOCOL_SSL)
 	//g.x224.SetRequestedProtocol(x224.PROTOCOL_RDP)
 
@@ -194,38 +244,14 @@ func (g *Client) Login(domain, user, pwd string, timeout int64) error {
 		return fmt.Errorf("[x224 connect err] %v", err)
 	}
 	glog.Info("wait connect ok")
-	wg := &sync.WaitGroup{}
-	breakFlag := false
-	wg.Add(1)
 
-	g.pdu.On("error", func(e error) {
-		err = e
-		glog.Error("error", e)
-		g.pdu.Emit("done")
-	})
-	g.pdu.On("close", func() {
-		err = errors.New("close")
-		glog.Info("on close")
-		g.pdu.Emit("done")
-	})
-	g.pdu.On("success", func() {
-		err = nil
-		glog.Info("on success")
-		g.pdu.Emit("done")
-	})
-	g.pdu.On("ready", func() {
-		glog.Info("on ready")
-		g.pdu.Emit("done")
-	})
-	g.pdu.On("update", func(rectangles []pdu.BitmapData) {
-		glog.Info("on update:", rectangles)
-	})
-	g.pdu.On("done", func() {
-		if breakFlag == false {
-			breakFlag = true
-			wg.Done()
-		}
-	})
-	wg.Wait()
-	return err
+	timer := time.NewTimer(timeoutDuration)
+	defer timer.Stop()
+
+	select {
+	case err := <-state.done:
+		return err
+	case <-timer.C:
+		return fmt.Errorf("rdp login timeout after %s", timeoutDuration)
+	}
 }
