@@ -1,0 +1,72 @@
+name: 缺陷报告
+description: 提交可复现的崩溃、误报、漏报或兼容性问题
+title: "[Bug] "
+labels:
+  - bug
+  - needs-reproduction
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请仅在合法授权环境中复现，并移除目标、凭据、Token 等敏感信息。
+
+  - type: input
+    id: version
+    attributes:
+      label: dddd 版本
+      description: 提供 Release 版本或 Git commit。
+      placeholder: v2.0.2 / 4c428a7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: 执行命令
+      description: 使用脱敏后的目标和参数。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为与完整日志
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 最小复现步骤
+      description: 说明靶场、服务版本和稳定复现步骤。
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: authorization
+    attributes:
+      label: 授权确认
+      options:
+        - label: 我在合法授权环境中完成了测试，并已删除敏感信息。
+          required: true

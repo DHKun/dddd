@@ -1,0 +1,37 @@
+name: 功能建议
+description: 提议可验证的新功能或行为改进
+title: "[Feature] "
+labels:
+  - feature
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 描述目标用户、工作流和当前阻碍。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述参数、输入输出和兼容性要求。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 列出可以通过测试确认的结果。
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 安全边界
+      options:
+        - label: 该功能用于合法授权的安全测试场景。
+          required: true

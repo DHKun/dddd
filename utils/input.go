@@ -180,6 +180,28 @@ func RemoveDuplicateElement(input []string) []string {
 	return result
 }
 
+// NormalizeTargetInputs trims surrounding whitespace, removes empty entries,
+// and de-duplicates targets while preserving their original order.
+func NormalizeTargetInputs(input []string) []string {
+	seen := make(map[string]struct{}, len(input))
+	result := make([]string, 0, len(input))
+
+	for _, item := range input {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+
+	return result
+}
+
 func RemoveDuplicateElementInt(input []int) []int {
 	temp := map[int]struct{}{}
 	var result []int

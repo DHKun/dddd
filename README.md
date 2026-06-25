@@ -1,7 +1,10 @@
 # 工具简介
 
-![](https://socialify.git.ci/SleepingBag945/dddd/image?description=1&font=Inter&forks=1&name=1&owner=1&pattern=Circuit%20Board&stargazers=1&theme=Light)
+![](https://socialify.git.ci/DHKun/dddd/image?description=1&font=Inter&forks=1&name=1&owner=1&pattern=Circuit%20Board&stargazers=1&theme=Light)
 
+本仓库是 [SleepingBag945/dddd](https://github.com/SleepingBag945/dddd) 的持续维护分支，保留原项目 MIT License 与作者署名。维护重点包括稳定性、跨平台兼容、回归测试、依赖更新和社区 Issue 修复。
+
+问题反馈请使用仓库提供的 Issue 模板，并附带脱敏后的最小复现步骤。项目自身的安全漏洞请通过 [Private Vulnerability Reporting](https://github.com/DHKun/dddd/security/advisories/new) 提交。
 
 
 ## 特点
