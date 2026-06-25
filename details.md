@@ -159,9 +159,17 @@ icp.name="带带弟弟"
 ./dddd -t result.txt
 ```
 
+支持恢复以下信息：
+
+- `ip:port open` 端口结果，包括带 `[+]` 日志前缀的格式
+- `[*] WebTitle URL ...` Web目标
+- `[+] InfoScan URL [...]` Web目标
+
+导入 `WebTitle` 和 `InfoScan` 时，dddd 会重新访问目标并使用自身指纹库确认产品，再选择对应 POC。
+
 ##### 从dddd的result导入结果
 
-导入dddd指纹识别历史(json/text均可)，直接开始漏洞扫描
+导入dddd的 `Nmap`、`Web` 和指纹识别历史，支持JSON与文本格式。
 
 ```
 ./dddd -t result.txt

@@ -7,7 +7,6 @@ import (
 	"dddd/utils"
 	"embed"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"github.com/projectdiscovery/goflags"
 	"github.com/projectdiscovery/gologger"
@@ -392,45 +391,14 @@ func prepare() {
 		} else if !structs.GlobalConfig.Fofa && !structs.GlobalConfig.Hunter {
 			// 从本地文件获取目标
 			if utils.GetInputType(tg) == structs.TypeUnSupport {
-				if strings.HasPrefix(tg, "[") {
-					// 解析历史指纹
-					if strings.HasPrefix(tg, "[Finger") {
-						t := strings.Split(tg, " ")
-						uri := t[1]
-						tf := ""
-
-						if strings.HasPrefix(uri, "http") {
-							tf = t[3]
-						} else {
-							tf = t[2]
-						}
-						if len(tf) <= 2 {
-							continue
-						}
-						tf = tf[1 : len(tf)-1]
-						fingers := strings.Split(tf, ",")
-						structs.GlobalResultMap[uri] = fingers
-						continue
+				if imported, ok := parseImportedScanResult(tg); ok {
+					if imported.target != "" {
+						structs.GlobalConfig.Targets = append(structs.GlobalConfig.Targets, imported.target)
 					}
-
-				} else if strings.HasPrefix(tg, "{") {
-					var in ddout.OutputMessage
-					err := json.Unmarshal([]byte(tg), &in)
-					if err == nil {
-						if in.Type == "Finger" {
-							structs.GlobalResultMap[in.URI] = in.Finger
-							continue
-						}
-						continue
+					if imported.fingerprintTarget != "" {
+						mergeImportedFingerprints(structs.GlobalResultMap, imported.fingerprintTarget, imported.fingerprints)
 					}
-
-				} else if strings.HasSuffix(tg, " open") {
-					ipPort := strings.ReplaceAll(tg, " open", "")
-					if utils.IsIPPort(ipPort) {
-						structs.GlobalConfig.Targets = append(structs.GlobalConfig.Targets, ipPort)
-						continue
-					}
-
+					continue
 				}
 				// gologger.Error().Msgf("不支持的格式: %s", tg)
 				continue
@@ -439,6 +407,7 @@ func prepare() {
 
 		structs.GlobalConfig.Targets = append(structs.GlobalConfig.Targets, tg)
 	}
+	structs.GlobalConfig.Targets = utils.NormalizeTargetInputs(structs.GlobalConfig.Targets)
 
 	if len(structs.GlobalConfig.Targets) == 0 && len(structs.GlobalResultMap) == 0 {
 		gologger.Fatal().Msgf("无目标输入")
