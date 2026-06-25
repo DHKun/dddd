@@ -23,6 +23,18 @@ func main() {
 
 	workflow()
 }
+
+func appendDomainProbeURLs(urls, domains []string) []string {
+	for _, domain := range domains {
+		domain = strings.TrimSpace(domain)
+		if domain == "" {
+			continue
+		}
+		urls = append(urls, "http://"+domain, "https://"+domain)
+	}
+	return utils.RemoveDuplicateElement(urls)
+}
+
 func workflow() {
 	var domains []string
 	var urls []string
@@ -58,6 +70,9 @@ func workflow() {
 			urls = append(urls, input)
 		}
 	}
+
+	// 用户显式输入的域名始终直接进入Web探针，避免IP入口、虚拟主机或CDN路由造成漏报。
+	urls = appendDomainProbeURLs(urls, domains)
 
 	if structs.GlobalConfig.Subdomain && len(domains) > 0 {
 		subdomains := common.GetSubDomain(domains)
