@@ -458,6 +458,8 @@ Alibaba-Druid:
 
 https://nuclei.projectdiscovery.io/templating-guide/
 
+引擎版本、模板兼容范围和升级门禁见[`docs/nuclei-upgrade.md`](docs/nuclei-upgrade.md)。
+
 
 
 dddd内置了2400+ poc，如果需要添加poc可以将新增poc存放在`config/pocs/*`，dddd会自动使用外置的poc补充内置的poc。

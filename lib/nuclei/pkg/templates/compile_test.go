@@ -150,6 +150,34 @@ func Test_ParseFromFile(t *testing.T) {
 	require.Equal(t, expectedTemplate.ID, got.ID)
 }
 
+func TestParseV33StyleCompatibility(t *testing.T) {
+	setup()
+
+	got, err := templates.Parse("tests/compat-v3-3-style.yaml", nil, executerOpts)
+	require.NoError(t, err)
+	require.Equal(t, "compatibility-v3-3-style", got.ID)
+	require.Equal(t, []string{"compatibility-v3-3"}, got.Info.Tags.ToSlice())
+	require.Regexp(t, "^[a-zA-Z0-9]{6}$", got.Variables.GetAll()["account"])
+	require.Equal(t, "Test123!", got.Variables.GetAll()["password"])
+	require.Len(t, got.RequestsHTTP, 1)
+
+	request := got.RequestsHTTP[0]
+	require.Len(t, request.Raw, 3)
+	require.Len(t, request.Operators.Extractors, 2)
+	require.Equal(t, "session_cookie", request.Operators.Extractors[0].Name)
+	require.Equal(t, "kval", request.Operators.Extractors[0].Type.ExtractorType.String())
+	require.Equal(t, "header_1", request.Operators.Extractors[0].Part)
+	require.Equal(t, []string{"set_cookie"}, request.Operators.Extractors[0].KVal)
+	require.True(t, request.Operators.Extractors[0].Internal)
+	require.Equal(t, "created_account", request.Operators.Extractors[1].Name)
+	require.Equal(t, "json", request.Operators.Extractors[1].Type.ExtractorType.String())
+	require.Equal(t, "body_2", request.Operators.Extractors[1].Part)
+	require.Equal(t, []string{".account"}, request.Operators.Extractors[1].JSON)
+	require.Len(t, request.Operators.Matchers, 1)
+	require.Equal(t, "body_3", request.Operators.Matchers[0].Part)
+	require.Equal(t, []string{"{{account}}"}, request.Operators.Matchers[0].Words)
+}
+
 func Test_ParseWorkflow(t *testing.T) {
 	filePath := "tests/workflow.yaml"
 	expectedTemplate := &templates.Template{
