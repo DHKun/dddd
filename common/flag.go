@@ -353,7 +353,7 @@ func prepare() {
 			}
 		}
 	}
-	tmpTargets = utils.RemoveDuplicateElement(tmpTargets)
+	tmpTargets = utils.NormalizeTargetInputs(tmpTargets)
 
 	// 低感知模式
 	if structs.GlobalConfig.LowPerceptionMode {

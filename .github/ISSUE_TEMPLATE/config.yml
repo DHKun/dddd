@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用文档
+    url: https://github.com/DHKun/dddd/blob/main/README.md
+    about: 提交 Issue 前先查阅安装、参数和示例。
+  - name: 安全漏洞私密报告
+    url: https://github.com/DHKun/dddd/security/advisories/new
+    about: 涉及项目自身安全漏洞时使用私密报告。
