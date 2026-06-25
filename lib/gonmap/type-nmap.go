@@ -1,7 +1,6 @@
 package gonmap
 
 import (
-	"context"
 	"fmt"
 	"github.com/miekg/dns"
 	"strings"
@@ -28,31 +27,38 @@ type Nmap struct {
 }
 
 func (n *Nmap) ScanTimeout(ip string, port int, timeout time.Duration) (status Status, response *Response) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	var resChan = make(chan bool)
+	type scanResult struct {
+		status   Status
+		response *Response
+	}
 
-	defer func() {
-		close(resChan)
-		cancel()
-	}()
-
+	resultChan := make(chan scanResult, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				if fmt.Sprint(r) != "send on closed channel" {
-					panic(r)
+				logger.Printf("scan %s:%d panic: %v", ip, port, r)
+				select {
+				case resultChan <- scanResult{status: Closed}:
+				default:
 				}
 			}
 		}()
-		status, response = n.Scan(ip, port)
-		resChan <- true
+
+		scanStatus, scanResponse := n.Scan(ip, port)
+		resultChan <- scanResult{
+			status:   scanStatus,
+			response: scanResponse,
+		}
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
-	case <-ctx.Done():
+	case <-timer.C:
 		return Closed, nil
-	case <-resChan:
-		return status, response
+	case result := <-resultChan:
+		return result.status, result.response
 	}
 }
 

@@ -60,5 +60,21 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Run gonmap tests
+        working-directory: lib/gonmap
+        run: |
+          go vet .
+          go test .
+
+      - name: Run concurrency race tests
+        if: matrix.go-version == 'stable'
+        shell: bash
+        run: |
+          go test -race ./common
+          (
+            cd lib/gonmap
+            go test -race .
+          )
+
       - name: Build packages
         run: go build ./...
