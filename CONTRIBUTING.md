@@ -2,7 +2,7 @@
 
 ## 开始开发
 
-项目使用 Go 1.21 或更高版本。
+项目使用 Go 1.21 或更高版本，正式支持平台为 Linux amd64。
 
 ```bash
 git clone https://github.com/DHKun/dddd.git

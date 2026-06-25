@@ -11,14 +11,11 @@ permissions:
 
 jobs:
   test:
-    name: Go ${{ matrix.go-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Go ${{ matrix.go-version }} on Linux
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
         go-version:
           - "1.21.x"
           - "stable"
