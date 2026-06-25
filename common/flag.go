@@ -17,11 +17,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"runtime"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -245,25 +243,6 @@ func ReadWorkFlowDB() {
 	}
 }
 
-func ToInt(s string) int {
-	i, err := strconv.Atoi(s)
-	if err != nil {
-		return 0
-	}
-	return i
-}
-
-func GetFdLimit() int {
-	cmd := exec.Command("sh", "-c", "ulimit -n")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		println(err.Error())
-		return -1
-	}
-	s := strings.TrimSpace(string(out))
-	return ToInt(s)
-}
-
 func prepare() {
 	var tmpTargets []string
 
@@ -413,14 +392,29 @@ func prepare() {
 		gologger.Fatal().Msgf("无目标输入")
 	}
 
-	// 如果是Linux则调整扫描线程 gogo抄的感谢感谢
+	// Linux TCP扫描会为每个并发连接占用文件描述符。
 	if IsLinux() {
-		structs.GlobalConfig.TCPPortScanThreads = 4000
-		if fdlimit := GetFdLimit(); structs.GlobalConfig.TCPPortScanThreads > fdlimit {
-			gologger.Warning().Msgf("System fd limit: %d , Please exec 'ulimit -n 65535'", fdlimit)
-			gologger.Warning().Msgf("Now set threads to %d", fdlimit-100)
-			structs.GlobalConfig.TCPPortScanThreads = fdlimit - 100
+		fdStatus := configureTCPScanThreads(structs.GlobalConfig.TCPPortScanThreads)
+		structs.GlobalConfig.TCPPortScanThreads = fdStatus.Effective
+		if fdStatus.Err != nil {
+			gologger.Warning().Msgf("读取或调整文件描述符限制失败: %v", fdStatus.Err)
 		}
+		if fdStatus.Raised {
+			gologger.Info().Msgf("已提升文件描述符软限制: %d -> %d", fdStatus.OriginalSoft, fdStatus.Soft)
+		}
+		if fdStatus.Effective != fdStatus.Requested {
+			gologger.Warning().Msgf(
+				"TCP扫描线程已调整: %d -> %d (fd soft=%d hard=%d)",
+				fdStatus.Requested,
+				fdStatus.Effective,
+				fdStatus.Soft,
+				fdStatus.Hard,
+			)
+		}
+	}
+	if structs.GlobalConfig.TCPPortScanTimeout < 1 {
+		gologger.Warning().Msgf("TCP端口扫描超时已调整: %d -> 1 秒", structs.GlobalConfig.TCPPortScanTimeout)
+		structs.GlobalConfig.TCPPortScanTimeout = 1
 	}
 
 	ddout.OutputType = structs.GlobalConfig.OutputType
@@ -546,7 +540,7 @@ func Flag() {
 		flagSet.StringVarP(&PortString, "port", "p", "", "端口设置。 默认扫描Top1000"),
 		flagSet.StringVarP(&structs.GlobalConfig.NoPortString, "no-port", "np", "", "禁止扫描的端口"),
 		flagSet.StringVarP(&structs.GlobalConfig.PortScanType, "scan-type", "st", "tcp", "端口扫描方式 | \"-st tcp\"设置TCP扫描 | \"-st syn\"设置SYN扫描"),
-		flagSet.IntVarP(&structs.GlobalConfig.TCPPortScanThreads, "tcp-scan-threads", "tst", 1000, "TCP扫描线程 | Windows/Mac默认1000线程 Linux默认4000"),
+		flagSet.IntVarP(&structs.GlobalConfig.TCPPortScanThreads, "tcp-scan-threads", "tst", 4000, "TCP扫描线程 | Linux默认4000，受进程文件描述符上限约束"),
 		flagSet.IntVarP(&structs.GlobalConfig.SYNPortScanThreads, "syn-scan-threads", "sst", 10000, "SYN扫描线程"),
 		flagSet.StringVarP(&structs.GlobalConfig.MasscanPath, "masscan-path", "mp", "masscan", "指定masscan程序路径 | SYN扫描依赖"),
 		flagSet.IntVarP(&structs.GlobalConfig.PortsThreshold, "ports-max-count", "pmc", 300, "IP端口数量阈值 | 当一个IP的端口数量超过此值，此IP将会被抛弃"),

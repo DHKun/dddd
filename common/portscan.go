@@ -58,7 +58,10 @@ var BackListLock sync.Mutex
 
 func PortScanTCP(IPs []string, Ports string, NoPorts string, timeout int) []string {
 	var AliveAddress []string
-	gologger.AuditTimeLogger("开始TCP端口扫描，端口设置: %s\nTCP端口扫描目标:%s", Ports, strings.Join(IPs, ","))
+	if timeout < 1 {
+		timeout = 1
+	}
+	gologger.AuditTimeLogger("开始TCP端口扫描，端口设置: %s，目标数量: %d", Ports, len(IPs))
 	ports := ParsePort(Ports)
 	noPorts := ParsePort(NoPorts)
 
@@ -79,16 +82,28 @@ func PortScanTCP(IPs []string, Ports string, NoPorts string, timeout int) []stri
 	IPPortCount := make(map[string]int)
 	BackList = make(map[string]struct{})
 
-	workers := structs.GlobalConfig.TCPPortScanThreads
-	if workers > len(IPs)*len(probePorts) {
-		workers = len(IPs) * len(probePorts)
+	taskCount := portScanTaskCount(len(IPs), len(probePorts))
+	workers := tcpPortScanWorkerCount(structs.GlobalConfig.TCPPortScanThreads, taskCount)
+	if workers == 0 {
+		gologger.AuditTimeLogger("TCP端口扫描结束，无有效任务")
+		return AliveAddress
 	}
-	Addrs := make(chan Addr, structs.GlobalConfig.TCPPortScanThreads)
-	results := make(chan string, structs.GlobalConfig.TCPPortScanThreads)
-	var wg sync.WaitGroup
+	estimated := estimateTCPPortScanDuration(taskCount, workers, timeout)
+	gologger.Info().Msgf(
+		"TCP端口扫描任务: %d，并发: %d，连接超时: %ds，最坏耗时估算: %s",
+		taskCount,
+		workers,
+		timeout,
+		estimated,
+	)
+
+	Addrs := make(chan Addr, workers)
+	results := make(chan string, workers)
+	resultDone := make(chan struct{})
 
 	//接收结果
 	go func() {
+		defer close(resultDone)
 		for found := range results {
 			AliveAddress = append(AliveAddress, found)
 
@@ -113,17 +128,19 @@ func PortScanTCP(IPs []string, Ports string, NoPorts string, timeout int) []stri
 			} else {
 				IPPortCount[ip] = 1
 			}
-
-			wg.Done()
 		}
 	}()
 
 	//多线程扫描
+	var workerGroup sync.WaitGroup
+	workerGroup.Add(workers)
 	for i := 0; i < workers; i++ {
 		go func() {
+			defer workerGroup.Done()
 			for addr := range Addrs {
-				PortConnect(addr, results, timeout, &wg)
-				wg.Done()
+				if address, ok := PortConnect(addr, timeout); ok {
+					results <- address
+				}
 			}
 		}()
 	}
@@ -131,16 +148,51 @@ func PortScanTCP(IPs []string, Ports string, NoPorts string, timeout int) []stri
 	//添加扫描目标
 	for _, port := range probePorts {
 		for _, host := range IPs {
-			wg.Add(1)
 			Addrs <- Addr{host, port}
 		}
 	}
-	wg.Wait()
 	close(Addrs)
+	workerGroup.Wait()
 	close(results)
+	<-resultDone
 	gologger.AuditTimeLogger("TCP端口扫描结束")
 
 	return AliveAddress
+}
+
+func portScanTaskCount(hostCount, portCount int) int {
+	if hostCount <= 0 || portCount <= 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if hostCount > maxInt/portCount {
+		return maxInt
+	}
+	return hostCount * portCount
+}
+
+func tcpPortScanWorkerCount(requested, taskCount int) int {
+	if taskCount <= 0 {
+		return 0
+	}
+	if requested < 1 {
+		requested = 1
+	}
+	if requested > taskCount {
+		return taskCount
+	}
+	return requested
+}
+
+func estimateTCPPortScanDuration(taskCount, workers, timeoutSeconds int) time.Duration {
+	if taskCount <= 0 || workers <= 0 || timeoutSeconds <= 0 {
+		return 0
+	}
+	batches := taskCount / workers
+	if taskCount%workers != 0 {
+		batches++
+	}
+	return time.Duration(batches) * time.Duration(timeoutSeconds) * time.Second
 }
 
 type Addr struct {
@@ -149,18 +201,19 @@ type Addr struct {
 }
 
 var PortScan bool
+var tcpPortDial = WrapperTcpWithTimeout
 
-func PortConnect(addr Addr, respondingHosts chan<- string, adjustedTimeout int, wg *sync.WaitGroup) {
+func PortConnect(addr Addr, adjustedTimeout int) (string, bool) {
 	inblack := false
 	BackListLock.Lock()
 	_, inblack = BackList[addr.ip]
 	BackListLock.Unlock()
 	if inblack {
-		return
+		return "", false
 	}
 
 	host, port := addr.ip, addr.port
-	conn, err := WrapperTcpWithTimeout("tcp4", fmt.Sprintf("%s:%v", host, port), time.Duration(adjustedTimeout)*time.Second)
+	conn, err := tcpPortDial("tcp4", fmt.Sprintf("%s:%v", host, port), time.Duration(adjustedTimeout)*time.Second)
 	defer func() {
 		if conn != nil {
 			conn.Close()
@@ -184,9 +237,9 @@ func PortConnect(addr Addr, respondingHosts chan<- string, adjustedTimeout int, 
 				AdditionalMsg: "TCP:" + strconv.Itoa(port),
 			})
 		}
-		wg.Add(1)
-		respondingHosts <- address
+		return address, true
 	}
+	return "", false
 }
 
 func PortScanSYN(IPs []string) []string {
